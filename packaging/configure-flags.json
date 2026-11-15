@@ -37,6 +37,7 @@
   ],
   "windows": [
     "--enable-dsound",
+    "--disable-nettle",
     "--extra-cflags=-DBUILDING_LIBSLIRP"
   ]
 }
