@@ -37,6 +37,7 @@ jobs:
           QTEST_QEMU_BINARY=$PWD/qemu-system-mips64 \
               ./tests/qtest/sgi-display-shm-test --tap -k
       - name: smoke
+        if: always()
         run: |
           set -eu
           d=$(mktemp -d /tmp/dsp.XXXXXX)
