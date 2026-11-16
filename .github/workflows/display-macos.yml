@@ -40,7 +40,7 @@ jobs:
         run: |
           set -eu
           d=$(mktemp -d /tmp/dsp.XXXXXX)
-          head -c 1048576 /dev/zero | tr '\0' '\377' > "$d/prom"
+          printf '\377\377\377\377' > "$d/prom"
           build/qemu-system-mips64 -M octane2,display-shm=smoke,display-shm-socket="$d/display.sock" \
               -m 256M -cpu R12000,r12000-prid=0xe24,r12000-fpu-id=0x7654,reset-mode=0x1aa683 \
               -bios "$d/prom" -S -display none -serial none -monitor none \
