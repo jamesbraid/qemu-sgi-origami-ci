@@ -6,7 +6,7 @@ name: Display shared memory on macOS
 
 on:
   push:
-    branches: ["ci/display-macos"]
+    branches: ["ci/display-macos-prefix"]
   workflow_dispatch:
 
 permissions:
