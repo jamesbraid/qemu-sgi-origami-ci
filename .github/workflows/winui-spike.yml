@@ -50,13 +50,14 @@ jobs:
       - name: Start QEMU with a display socket and attach
         run: |
           set +e
+          export SDL_AUDIODRIVER=dummy
           exe=$(find qemu -name 'qemu-system-mips64.exe' | head -1)
           printf '\xff\xff\xff\xff' > prom.bin
           sock="$(pwd -W)\\d.sock"
           echo "socket: $sock"
           "$exe" -M "octane2,display-shm=sgi-dsp-spike,display-shm-socket=$sock" -m 256M \
             -cpu "R12000,r12000-prid=0xe24,r12000-fpu-id=0x7654,reset-mode=0x1aa683" \
-            -bios prom.bin -S -display none -serial none -monitor none > qemu.log 2>&1 &
+            -bios prom.bin -S -display none -serial none -monitor none -audiodev none,id=snd0 > qemu.log 2>&1 &
           qpid=$!
           for i in $(seq 1 50); do [ -e d.sock ] && break; sleep 0.2; done
           ls -la d.sock; cat qemu.log
