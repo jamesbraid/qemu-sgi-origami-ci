@@ -1,0 +1,67 @@
+# Spike: attach a Windows viewer to the real QEMU display socket (protocol version 3) and
+# import the SHM_WIN32 sections it receives into D3D12 with no CPU copy. Uses the archive an
+# earlier release.yml run built; nothing here changes release.yml.
+name: winui-spike
+on:
+  push:
+    branches: [ci/winui-spike]
+  workflow_dispatch:
+env:
+  ARCHIVE_RUN: "43786897811"
+jobs:
+  build-viewer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cross-build the viewer
+        working-directory: spike/qemu-attach
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          rustup target add x86_64-pc-windows-gnu
+          cargo build --release --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qemu-attach
+          path: spike/qemu-attach/target/x86_64-pc-windows-gnu/release/qemu-attach.exe
+  attach:
+    needs: build-viewer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qemu-attach
+          path: viewer
+      - uses: actions/download-artifact@v4
+        with:
+          name: archive-windows-x86_64
+          run-id: ${{ env.ARCHIVE_RUN }}
+          github-token: ${{ github.token }}
+          path: dl
+      - name: Unpack QEMU
+        run: |
+          ls -la dl
+          mkdir qemu && cd qemu && unzip -q ../dl/*.zip && cd ..
+          find qemu -maxdepth 2 -name 'qemu-system-mips64*.exe' -print
+      - name: Start QEMU with a display socket and attach
+        run: |
+          set +e
+          exe=$(find qemu -name 'qemu-system-mips64.exe' | head -1)
+          printf '\xff\xff\xff\xff' > prom.bin
+          sock="$(pwd -W)\\d.sock"
+          echo "socket: $sock"
+          "$exe" -M "octane2,display-shm=sgi-dsp-spike,display-shm-socket=$sock" -m 256M \
+            -cpu "R12000,r12000-prid=0xe24,r12000-fpu-id=0x7654,reset-mode=0x1aa683" \
+            -bios prom.bin -S -display none -serial none -monitor none > qemu.log 2>&1 &
+          qpid=$!
+          for i in $(seq 1 50); do [ -e d.sock ] && break; sleep 0.2; done
+          ls -la d.sock; cat qemu.log
+          ./viewer/qemu-attach.exe "$sock" --warp; echo "attach exit=$?"
+          ./viewer/qemu-attach.exe "$sock" --warp; echo "second attach exit=$?"
+          kill $qpid 2>/dev/null
+          echo "--- qemu.log"; cat qemu.log
+          exit 0
