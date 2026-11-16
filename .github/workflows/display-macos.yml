@@ -1,0 +1,57 @@
+# Build QEMU on macOS and run the display-shm tests there: the qtest, and a
+# smoke run that starts octane2 with display-shm and has a reader take every
+# region handle and map it. Forgejo has no macOS runner, so this runs on
+# github.com only.
+name: Display shared memory on macOS
+
+on:
+  push:
+    branches: ["ci/display-macos"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Build and test on macOS
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - name: install build tools
+        run: brew install ninja pkgconf glib pixman meson python
+      - name: configure
+        run: |
+          mkdir build && cd build
+          ../configure --target-list=mips64-softmmu --disable-docs \
+              --disable-werror --disable-user
+      - name: build
+        run: make -C build -j"$(sysctl -n hw.ncpu)" qemu-system-mips64 tests/qtest/sgi-display-shm-test
+      - name: qtest
+        run: |
+          cd build
+          QTEST_QEMU_BINARY=$PWD/qemu-system-mips64 \
+              ./tests/qtest/sgi-display-shm-test --tap -k
+      - name: smoke
+        run: |
+          set -eu
+          d=$(mktemp -d /tmp/dsp.XXXXXX)
+          head -c 1048576 /dev/zero | tr '\0' '\377' > "$d/prom"
+          build/qemu-system-mips64 -M octane2,display-shm=smoke,display-shm-socket="$d/display.sock" \
+              -m 256M -cpu R12000,r12000-prid=0xe24,r12000-fpu-id=0x7654,reset-mode=0x1aa683 \
+              -bios "$d/prom" -S -display none -serial none -monitor none \
+              > "$d/qemu.log" 2>&1 &
+          pid=$!
+          rc=0
+          python3 .github/ci/display-shm-smoke.py "$d/display.sock" || rc=$?
+          sleep 2
+          n=$(grep -c 'cannot duplicate' "$d/qemu.log" || true)
+          echo "duplicate errors in the QEMU log: $n"
+          kill "$pid" || true
+          cat "$d/qemu.log"
+          [ "$n" -eq 0 ] || rc=1
+          exit $rc
