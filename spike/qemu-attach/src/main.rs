@@ -32,13 +32,14 @@ fn msg_len(kind: u16) -> Option<usize> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let warp = args.iter().any(|a| a == "--warp");
-    if let Err(e) = run(&args[1], warp) {
+    let hold = args.iter().position(|a| a == "--hold").and_then(|i| args.get(i + 1)).and_then(|v| v.parse().ok());
+    if let Err(e) = run(&args[1], warp, hold) {
         say("FATAL", e);
         std::process::exit(1);
     }
 }
 
-fn run(sock: &str, warp: bool) -> Result<()> {
+fn run(sock: &str, warp: bool, hold: Option<u64>) -> Result<()> {
     let mut s = UnixStream::connect(sock).map_err(|e| Error::new(E_FAIL, format!("connect: {e}")))?;
     say("connected", sock);
     let mut hello = [0u8; 48];
@@ -158,6 +159,10 @@ fn run(sock: &str, warp: bool) -> Result<()> {
             rb.Unmap(0, None);
             say(&format!("{tag}_gpu_readback_mismatching_bytes_of_1MiB"), bad);
             let _ = ManuallyDrop::new(0);
+            if let Some(secs) = hold {
+                say("holding", secs);
+                std::thread::sleep(std::time::Duration::from_secs(secs));
+            }
         }
     }
     Ok(())

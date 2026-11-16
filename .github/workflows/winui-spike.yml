@@ -57,12 +57,41 @@ jobs:
           echo "socket: $sock"
           "$exe" -M "octane2,display-shm=sgi-dsp-spike,display-shm-socket=$sock" -m 256M \
             -cpu "R12000,r12000-prid=0xe24,r12000-fpu-id=0x7654,reset-mode=0x1aa683" \
-            -bios prom.bin -S -display none -serial none -monitor none -audiodev none,id=snd0 > qemu.log 2>&1 &
+            -bios prom.bin -S -display none -serial none -monitor none -audiodev none,id=snd0 -qmp tcp:127.0.0.1:4455,server=on,wait=off > qemu.log 2>&1 &
           qpid=$!
           for i in $(seq 1 50); do [ -e d.sock ] && break; sleep 0.2; done
           ls -la d.sock; cat qemu.log
           ./viewer/qemu-attach.exe "$sock" --warp; echo "attach exit=$?"
           ./viewer/qemu-attach.exe "$sock" --warp; echo "second attach exit=$?"
+          echo "--- screendump comparison"
+          ./viewer/qemu-attach.exe "$sock" --warp --hold 12 > hold.txt 2>&1 &
+          apid=$!
+          for i in $(seq 1 60); do grep -q '^holding=' hold.txt && break; sleep 0.5; done
+          cat hold.txt
+          exec 3<>/dev/tcp/127.0.0.1/4455
+          sleep 1
+          shot="$(pwd -W)/shot.ppm"
+          printf '{"execute":"qmp_capabilities"}\n{"execute":"screendump","arguments":{"filename":"%s"}}\n' "$shot" >&3
+          sleep 3
+          timeout 2 cat <&3
+          exec 3>&-
+          ls -la shot.ppm
+          python - <<'PY'
+          import sys
+          d = open('shot.ppm','rb').read()
+          parts = d.split(b'\n', 3)
+          print('ppm header', parts[0], parts[1])
+          w, h = map(int, parts[1].split())
+          px = parts[3]
+          bad = 0; n = 262144
+          for i in range(n):
+              exp = ((i*4) & 0xff, (i*4+1) & 0xff, (i*4+2) & 0xff)
+              b = lambda k: ((k)*31 + 7) & 0xff
+              B, G, R = b(i*4), b(i*4+1), b(i*4+2)
+              if tuple(px[i*3:i*3+3]) != (R, G, B): bad += 1
+          print('screendump_vs_viewer_written_pixels: compared', n, 'mismatching', bad)
+          PY
+          wait $apid
           kill $qpid 2>/dev/null
           echo "--- qemu.log"; cat qemu.log
           exit 0
