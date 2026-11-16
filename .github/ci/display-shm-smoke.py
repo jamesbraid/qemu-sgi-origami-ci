@@ -19,7 +19,7 @@ else:
     sys.exit("cannot connect to " + path)
 s.settimeout(10)
 # HELLO: type 1, flags 0, seq 0, version 3, caps 0, pid, reserved, uuid, reserved
-s.sendall(struct.pack("<HHIIII16sQ", 1, 0, 0, 3, 0, os.getpid(), 0, bytes(16), 0))
+s.sendall(struct.pack("<HHIIIII16sQ", 1, 0, 0, 3, 0, os.getpid(), 0, bytes(16), 0))
 
 regions = 0
 control = None
