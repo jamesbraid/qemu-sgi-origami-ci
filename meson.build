@@ -1130,8 +1130,17 @@ glib = declare_dependency(dependencies: [glib_pc, gmodule],
 # the minimum supported glib is >= 2.75.3
 glib_has_gslice = glib.version().version_compare('<2.75.3')
 
-# override glib dep to include the above refinements
-meson.override_dependency('glib-2.0', glib)
+# Override glib dep to include the above refinements. With Apple's ld64 rustc
+# lacks linking modifiers, glib-sys's library args name glib twice and it refuses.
+# The -sys crates get the compile flags only: the C link carries the libraries.
+if have_rust and host_os == 'darwin'
+  meson.override_dependency('glib-2.0', glib.partial_dependency(compile_args: true, includes: true))
+  gobject_pc = dependency('gobject-2.0', version: glib_req_ver, required: true,
+                          method: 'pkg-config')
+  meson.override_dependency('gobject-2.0', gobject_pc.partial_dependency(compile_args: true, includes: true))
+else
+  meson.override_dependency('glib-2.0', glib)
+endif
 
 # The path to glib.h is added to all compilation commands.
 add_project_dependencies(glib.partial_dependency(compile_args: true, includes: true),
