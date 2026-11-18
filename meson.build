@@ -4518,9 +4518,9 @@ foreach target : target_dirs
 
   main_rs = []
   crates = []
+  rust_archive = []
   if have_rust and target_type == 'system'
     target_rust = rust_devices_ss.apply(config_target, strict: false)
-    arch_deps += target_rust.dependencies()
     foreach dep : target_rust.dependencies()
       crates += dep.get_variable('crate')
     endforeach
@@ -4532,6 +4532,17 @@ foreach target : target_dirs
                               build_by_default: true,
                               build_always_stale: true)
       main_rs = structured_sources(main_rs)
+    endif
+    if crates.length() > 0 and host_os == 'windows'
+      # rustc's link of the executable overruns Windows' 32767-character limit
+      # and leaves the static libraries unordered: link with the C compiler.
+      rust_archive = static_library('qemu-rust-' + target, main_rs,
+                                    dependencies: target_rust.dependencies(),
+                                    rust_abi: 'c',
+                                    build_by_default: false)
+      main_rs = []
+    else
+      arch_deps += target_rust.dependencies()
     endif
   endif
 
@@ -4599,6 +4610,7 @@ foreach target : target_dirs
                install: true,
                c_args: c_args,
                dependencies: arch_deps + exe['dependencies'],
+               link_whole: rust_archive,
                objects: lib.extract_all_objects(recursive: true),
                link_depends: [block_syms, qemu_syms],
                link_args: link_args,
