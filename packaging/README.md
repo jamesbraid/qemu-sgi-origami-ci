@@ -100,10 +100,14 @@ docker run --rm -v "$PWD":/src -w /src sgi-package \
     python3 packaging/sgi-package.py --tag sgi-origami-11.1.50-1
 ```
 
-macOS, on an arm64 Mac with the Xcode command line tools and
-`brew install ninja pkgconf python autoconf autoconf-archive automake libtool`:
+macOS, on an arm64 Mac with the Xcode command line tools, rustc 1.94 or newer
+from rustup and
+`brew install ninja pkgconf python autoconf autoconf-archive automake libtool`.
+The archive has QEMU's Rust devices and the GPU back end, which need `bindgen`
+on `PATH`; the build stops if the GPU back end was not built:
 
 ```sh
+cargo install bindgen-cli --version 0.73.2 --locked
 python3 packaging/sgi-package.py
 ```
 

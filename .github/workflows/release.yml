@@ -222,13 +222,49 @@ jobs:
         with:
           path: build-package/vcpkg-binary-cache
           key: vcpkg-macos-${{ hashFiles('packaging/vcpkg.json', 'packaging/vcpkg-commit', 'packaging/triplets/arm64-osx-origami.cmake') }}
+      # The runner's rustup only provides a current stable, and bindgen is not
+      # on it. bindgen-cli builds from source, so its binary is cached with the
+      # crates the GPU library fetches.
+      - name: cache bindgen and the GPU library's crates
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/bin/bindgen
+            ~/.cargo/registry
+          key: cargo-macos-bindgen-0.73.2-${{ hashFiles('rust/sgi-gpu/Cargo.lock') }}
+      - name: install rustc ${{ env.RUST_VERSION }} and bindgen
+        run: |
+          set -e
+          rustup toolchain install "$RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$RUST_VERSION"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # The cache restores the binary without cargo's install record, so a
+          # plain install would stop on "binary already exists".
+          if [ "$(bindgen --version 2>/dev/null)" != "bindgen 0.73.2" ]; then
+            cargo install bindgen-cli --version 0.73.2 --locked --force
+          fi
       - name: build the archive
         run: python3 packaging/sgi-package.py ${RELEASE_TAG:+--tag "$RELEASE_TAG"}
+      - name: the Rust devices and the GPU library are built in
+        run: |
+          set -e
+          build=build-package/qemu-build
+          devices=$build/mips64-softmmu-config-devices.mak
+          grep '^CONFIG_X_SGI_BIC_BOARD_INTERFACE_RUST=y' "$devices"
+          # A device falls back to its C copy when Rust is off, so check for
+          # the C one too.
+          if grep '^CONFIG_SGI_BIC_BOARD_INTERFACE_C=y' "$devices"; then
+            echo "the C board interface was built, not the Rust one"
+            exit 1
+          fi
+          grep '^#define CONFIG_HAVE_SGI_GPU' "$build/config-host.h"
       - name: run the archive
         run: |
           set -e
           mkdir unpacked
           tar -xzf build-package/dist/*.tar.gz -C unpacked
+          test -f unpacked/licenses/sgi-gpu.THIRD-PARTY-NOTICES.txt
+          ls unpacked/licenses/rust.*
           unpacked/bin/qemu-system-mips64 --version
           unpacked/bin/qemu-img --version
           unpacked/bin/qemu-system-mips64 -M help | tee machines.txt
@@ -240,6 +276,9 @@ jobs:
           quit | unpacked/bin/qemu-system-mips64 -M none -S -display none -monitor none \
               -serial none -qmp stdio -object tls-creds-anon,id=tc0,endpoint=server \
               -vnc 127.0.0.1:0,tls-creds=tc0
+          quit | unpacked/bin/qemu-system-mips64 -M none -S -display none -monitor none \
+              -serial none -qmp stdio -accel qtest -cpu R10000 \
+              -device sgi-bic-board-interface-fixture,id=bic,identity=0xc000
           unpacked/bin/qemu-img create -f luks --object secret,id=s,data=pw \
               -o key-secret=s "$RUNNER_TEMP/test.luks" 1M
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

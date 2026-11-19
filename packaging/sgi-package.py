@@ -26,8 +26,9 @@ built statically from the manifest in this directory at the commit named in
 vcpkg-commit. Each platform builds natively:
 
     linux    inside the image built from debian-bookworm.docker
-    macos    on an arm64 Mac with Xcode's tools and Homebrew's ninja,
-             pkgconf and python
+    macos    on an arm64 Mac with Xcode's tools, Homebrew's ninja,
+             pkgconf and python, and rustc 1.94 or newer and bindgen from
+             rustup and cargo
     windows  in an MSYS2 MINGW64 shell with the mingw-w64-x86_64 toolchain,
              pkgconf, ninja, python, git, rust-bindgen and clang installed,
              and rustc 1.94 or newer for x86_64-pc-windows-gnu from rustup.
@@ -95,7 +96,7 @@ LICENSE_FILES = [
 ]
 # Platforms whose archive carries the Rust devices, built with the "rust" list
 # of configure-flags.json.
-RUST_PLATFORMS = ('windows',)
+RUST_PLATFORMS = ('macos', 'windows')
 
 LICENSE_NAME = re.compile(r'^(LICEN[CS]E|COPYING|COPYRIGHT)', re.I)
 # The licence texts of the Rust crates the GPU back end links, kept current by
