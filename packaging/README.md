@@ -45,6 +45,10 @@ in `licenses/`:
   gettext). Each library's copyright file is `licenses/<library>.copyright`.
   Where vcpkg's file leaves out a licence the library is offered under,
   `packaging/licenses/` holds the replacement (nettle and libunistring).
+- Where QEMU's Rust devices are built in (the platforms in `RUST_PLATFORMS` in
+  `sgi-package.py`): the Rust crates linked statically from the `subprojects/`
+  crate wraps, whose licence files are `licenses/<crate>-<version>.LICENSE*`,
+  and the standard library, whose texts are `licenses/rust.*`.
 - Linux: libstdc++, which the CHD library's C++ links with
   `-static-libstdc++`. Its texts are `licenses/libstdc++.copyright` and
   `licenses/libstdc++.GPL-3`.

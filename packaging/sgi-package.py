@@ -12,7 +12,8 @@ else, in a fixed layout with no wrapping directory:
     bin/*.dll                Windows only: the MinGW runtime DLLs
     share/qemu/keymaps/      keyboard maps
     licenses/                QEMU's licences, one file per library built in,
-                             and on Windows the MinGW runtime's
+                             Rust's where Rust devices are built in, and on
+                             Windows the MinGW runtime's
 
 and is named sgi-origami-<version>-<platform>.tar.gz (Windows: .zip), where
 <version> is the release tag without its sgi-origami- prefix. Without --tag
@@ -86,6 +87,10 @@ LICENSE_FILES = [
     ('LICENSE.origami.paths', 'qemu.LICENSE.origami.paths'),
     ('hw/mips/sgi/models/LICENSE', 'qemu.sgi-models.LICENSE'),
 ]
+# Platforms whose archive carries the Rust devices, built with the "rust" list
+# of configure-flags.json.
+RUST_PLATFORMS = ()
+
 LICENSE_NAME = re.compile(r'^(LICEN[CS]E|COPYING|COPYRIGHT)', re.I)
 # The licence texts of the Rust crates the GPU back end links, kept current by
 # scripts/ci/sgi-rust-licences.py.
@@ -134,7 +139,8 @@ def configure_flags(name):
     """The configure arguments of platform `name`, from the shared list."""
     with open(HERE / 'configure-flags.json', encoding='utf-8') as f:
         flags = json.load(f)
-    return flags['common'] + flags[name]
+    extra = flags['rust'] if name in RUST_PLATFORMS else []
+    return flags['common'] + flags[name] + extra
 
 
 def source_version():
@@ -243,6 +249,9 @@ def build_environment(name, prefix, work):
         env['PKG_CONFIG_LIBDIR'] = pkgconfig
     if name == 'macos':
         env['MACOSX_DEPLOYMENT_TARGET'] = '15.0'
+    if name == 'windows':
+        # bindgen does not look for libclang.dll on PATH, where MSYS2 keeps it.
+        env.setdefault('LIBCLANG_PATH', str(toolchain_prefix() / 'bin'))
     return env
 
 
@@ -314,8 +323,16 @@ def used_subproject_licences(build):
                            f'in {build}: {error}') from None
     names = {sub['name'] for sub in projects.get('subprojects', [])}
     for sub in sorted(names):
-        for directory in sorted(glob.glob(str(SOURCE / 'subprojects' /
-                                              (sub + '*')))):
+        directories = glob.glob(str(SOURCE / 'subprojects' / (sub + '*')))
+        # A Rust crate's wrap is named for its API version (anyhow-1-rs) and
+        # unpacks to its full version (anyhow-1.0.98), which the wrap names.
+        wrap = SOURCE / 'subprojects' / (sub + '.wrap')
+        if wrap.is_file():
+            match = re.search(r'^directory\s*=\s*(\S+)', wrap.read_text(
+                encoding='utf-8'), re.M)
+            if match:
+                directories.append(str(SOURCE / 'subprojects' / match.group(1)))
+        for directory in sorted(set(directories)):
             directory = Path(directory)
             if not directory.is_dir() or directory.name == 'packagefiles':
                 continue
@@ -359,6 +376,8 @@ def stage(name, build, prefix, stage_dir, strip):
     if name == 'windows':
         origins = copy_windows_dlls(bin_dir, [prefix / 'bin'])
         copy_runtime_licences(toolchain_prefix(), origins, licences)
+    if name in RUST_PLATFORMS:
+        copy_rust_licences(rust_sysroot(), licences)
 
 
 def copy_gpu_notices(build, licences):
@@ -551,6 +570,36 @@ def copy_runtime_licences(prefix, dlls, licences):
                                f'{directory}')
         for text in texts:
             shutil.copy2(text, licences / f'{package}.{text.name}')
+
+
+def rust_sysroot():
+    """The sysroot of the rustc on PATH."""
+    try:
+        out = subprocess.run(['rustc', '--print', 'sysroot'], check=True,
+                             capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise PackageError(f'cannot find the Rust sysroot: {error}') from None
+    return Path(out.strip())
+
+
+def copy_rust_licences(sysroot, licences):
+    """Copy the Rust toolchain's licence texts into `licences`.
+
+    The Rust devices link Rust's standard library statically. rustup keeps the
+    texts of everything it bundles in share/doc/rust/licenses, MSYS2's rust
+    package in share/doc/rustc/licenses.
+    """
+    texts = []
+    for name in ('rust', 'rustc'):
+        directory = sysroot / 'share/doc' / name / 'licenses'
+        texts = (sorted(p for p in directory.iterdir() if p.is_file())
+                 if directory.is_dir() else [])
+        if texts:
+            break
+    if not texts:
+        raise PackageError(f'no Rust licence texts under {sysroot}/share/doc')
+    for text in texts:
+        shutil.copy2(text, licences / f'rust.{text.name}')
 
 
 # ---------------------------------------------------------------- archive --
