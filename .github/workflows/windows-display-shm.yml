@@ -1,6 +1,7 @@
-# The display-shm qtest on a Windows host. The Windows runners have no
-# compiler: MinGW cross-builds QEMU and the test on Linux, the test runs on
-# Windows. The cross-build itself is also part of build.yml's smoke check.
+# The display-shm qtest, the Rust board interface and the SGI GPU library on a
+# Windows host. The Windows runners have no compiler: MinGW cross-builds QEMU
+# and the tests on Linux, the tests run on Windows. The cross-build itself is
+# also part of build.yml's smoke check.
 name: windows display-shm
 
 on:
@@ -10,6 +11,14 @@ on:
       - 'ui/display-shm*'
       - 'include/ui/display-shm*'
       - 'tests/qtest/display-shm*'
+      - 'tests/qtest/sgi-gpu-test.c'
+      - 'rust/**'
+      - 'subprojects/**'
+      - 'scripts/rust/**'
+      - 'meson.build'
+      - 'packaging/configure-flags.json'
+      - 'scripts/ci/sgi-check'
+      - 'tests/docker/dockerfiles/fedora-win64-cross*'
       - '.github/workflows/windows-display-shm.yml'
 
 concurrency:
@@ -53,7 +62,7 @@ jobs:
     if: ${{ github.server_url != 'https://github.com' }}
     needs: cross-build
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/download-artifact@v3
         with:
@@ -80,3 +89,33 @@ jobs:
           }
           Get-Content $out, "$out.err"
           exit $code
+
+      # The GPU test runs on WARP, the runner's software adapter. It skips
+      # when it finds no adapter, which would hide a broken Rust or GPU link.
+      - name: Rust board interface and GPU library
+        shell: powershell
+        run: |
+          $exe = "$PWD\win-stage\qemu-system-mips64.exe"
+          $env:QTEST_QEMU_BINARY = $exe
+          & $exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (-not ((& $exe -M help) -match '\boctane2\b')) { throw 'octane2 is not listed' }
+          $failed = $false
+          foreach ($name in 'sgi-bic-board-interface-test', 'sgi-gpu-test') {
+            $out = "$env:RUNNER_TEMP\$name.txt"
+            $p = Start-Process -FilePath "$PWD\win-stage\$name.exe" -ArgumentList '--tap' `
+              -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+            $null = $p.Handle
+            if (-not $p.WaitForExit(600000)) {
+              $p.Kill()
+              Get-Process qemu-system-mips64 -ErrorAction SilentlyContinue | Stop-Process -Force
+              "$name timed out after 10 minutes"
+              $failed = $true
+              continue
+            }
+            "--- $name exit=$($p.ExitCode)"
+            Get-Content $out, "$out.err"
+            if ($p.ExitCode) { $failed = $true }
+            if ((Get-Content $out -Raw) -match '# SKIP') { "$name skipped"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
