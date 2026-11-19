@@ -9,7 +9,9 @@ else, in a fixed layout with no wrapping directory:
     bin/qemu-img             disk image tool
     bin/qemu-sgi-machine-init
                              builds a new machine's storage
-    bin/*.dll                Windows only: the MinGW runtime DLLs
+    bin/*.dll                Windows only: the MinGW runtime DLLs, and the
+                             DirectX Shader Compiler when the GPU back end is
+                             built in
     share/qemu/keymaps/      keyboard maps
     licenses/                QEMU's licences, one file per library built in,
                              Rust's where Rust devices are built in, and on
@@ -37,6 +39,7 @@ arguments are in configure-flags.json, which scripts/ci/sgi-check shares.
 import argparse
 import glob
 import gzip
+import hashlib
 import json
 import os
 import platform as host_platform_module
@@ -47,6 +50,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -342,8 +346,11 @@ def used_subproject_licences(build):
     return found
 
 
-def stage(name, build, prefix, stage_dir, strip):
-    """Lay the archive's tree out in an empty `stage_dir`."""
+def stage(name, build, prefix, stage_dir, strip, dxc=None):
+    """Lay the archive's tree out in an empty `stage_dir`.
+
+    `dxc` is the DirectX Shader Compiler zip a Windows build ships.
+    """
     exe = PLATFORMS[name][2]
     if stage_dir.exists():
         shutil.rmtree(stage_dir)
@@ -378,12 +385,13 @@ def stage(name, build, prefix, stage_dir, strip):
         copy_runtime_licences(toolchain_prefix(), origins, licences)
     if name in RUST_PLATFORMS:
         copy_rust_licences(rust_sysroot(), licences)
+    if dxc:
+        copy_dxc(dxc, bin_dir, licences)
 
 
 def copy_gpu_notices(build, licences):
     """Copy the GPU back end's crate notices, if this build linked it."""
-    config = (build / 'config-host.h').read_text(encoding='utf-8')
-    if re.search(r'^#define CONFIG_HAVE_SGI_GPU\b', config, re.M):
+    if gpu_linked(build):
         shutil.copy2(SOURCE / GPU_NOTICES,
                      licences / 'sgi-gpu.THIRD-PARTY-NOTICES.txt')
 
@@ -602,6 +610,55 @@ def copy_rust_licences(sysroot, licences):
         shutil.copy2(text, licences / f'rust.{text.name}')
 
 
+def gpu_linked(build):
+    """Whether the build linked the SGI GPU back end."""
+    config = (build / 'config-host.h').read_text(encoding='utf-8')
+    return bool(re.search(r'^#define CONFIG_HAVE_SGI_GPU\b', config, re.M))
+
+
+def fetch_dxc(work):
+    """Download the pinned DirectX Shader Compiler zip into `work`."""
+    with open(HERE / 'dxc.json', encoding='utf-8') as f:
+        pin = json.load(f)
+    target = work / pin['url'].rsplit('/', 1)[1]
+    if not target.is_file() or sha256(target) != pin['sha256']:
+        with urllib.request.urlopen(pin['url']) as reply, \
+                open(target, 'wb') as out:
+            shutil.copyfileobj(reply, out)
+    if sha256(target) != pin['sha256']:
+        raise PackageError(f'{target.name} does not match the SHA-256 in '
+                           'dxc.json')
+    return target
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def copy_dxc(archive, bin_dir, licences):
+    """Put the x64 compiler DLLs in `bin_dir` and the release's texts in
+    `licences`. wgpu loads them from beside the emulator.
+    """
+    wanted = {'bin/x64/dxcompiler.dll': bin_dir / 'dxcompiler.dll',
+              'bin/x64/dxil.dll': bin_dir / 'dxil.dll'}
+    with zipfile.ZipFile(archive) as z:
+        # The release's zip names its members with backslashes.
+        members = {i.filename.replace('\\', '/'): i for i in z.infolist()}
+        for name in (n for n in members if '/' not in n
+                     and LICENSE_NAME.match(n)):
+            wanted[name] = licences / f'dxc.{name}'
+        missing = [n for n in wanted if n not in members]
+        if missing or not any(t.parent == licences for t in wanted.values()):
+            raise PackageError(f'{archive.name} lacks {missing or "licences"}')
+        for name, target in wanted.items():
+            with z.open(members[name]) as source, open(target, 'wb') as out:
+                shutil.copyfileobj(source, out)
+
+
 # ---------------------------------------------------------------- archive --
 
 def tree_entries(stage_dir):
@@ -680,8 +737,10 @@ def package(args):
     env = build_environment(name, prefix, work)
     build_qemu(name, build, env, f'sgi-origami {label}', args.jobs)
 
+    gpu = gpu_linked(build)
     stage_dir = work / 'stage'
-    stage(name, build, prefix, stage_dir, not args.no_strip)
+    dxc = fetch_dxc(work) if name == 'windows' and gpu else None
+    stage(name, build, prefix, stage_dir, not args.no_strip, dxc)
     problems = stray_libraries(name, stage_dir / 'bin')
     if problems:
         raise PackageError('executables need libraries outside the archive:\n'

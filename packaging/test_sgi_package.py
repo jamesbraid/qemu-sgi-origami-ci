@@ -4,6 +4,7 @@
 
 import importlib.machinery
 import importlib.util
+import json
 import tarfile
 import tempfile
 import unittest
@@ -273,6 +274,78 @@ class RustLicences(unittest.TestCase):
                 pkg.copy_rust_licences(sysroot, licences)
                 self.assertEqual([p.name for p in licences.iterdir()],
                                  ['rust.MIT.txt'])
+
+
+class Dxc(unittest.TestCase):
+    NAMES = ['bin\\x64\\dxcompiler.dll', 'bin\\x64\\dxil.dll',
+             'bin\\arm64\\dxil.dll', 'inc\\hlsl\\LICENCE.txt',
+             'LICENSE-LLVM.txt', 'LICENCE-MIT.txt']
+
+    def zip(self, tmp, names=None):
+        path = Path(tmp) / 'dxc.zip'
+        with zipfile.ZipFile(path, 'w') as z:
+            for name in self.NAMES if names is None else names:
+                z.writestr(name, name)
+        return path
+
+    def test_dlls_and_licences_are_copied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir, licences = Path(tmp) / 'bin', Path(tmp) / 'licenses'
+            bin_dir.mkdir()
+            licences.mkdir()
+            pkg.copy_dxc(self.zip(tmp), bin_dir, licences)
+            self.assertEqual(sorted(p.name for p in bin_dir.iterdir()),
+                             ['dxcompiler.dll', 'dxil.dll'])
+            self.assertEqual((bin_dir / 'dxil.dll').read_text(),
+                             'bin\\x64\\dxil.dll')
+            self.assertEqual(sorted(p.name for p in licences.iterdir()),
+                             ['dxc.LICENCE-MIT.txt', 'dxc.LICENSE-LLVM.txt'])
+
+    def test_a_zip_without_the_dlls_or_licences_is_refused(self):
+        for names in (self.NAMES[2:], self.NAMES[:4]):
+            with tempfile.TemporaryDirectory() as tmp:
+                for d in ('bin', 'licenses'):
+                    (Path(tmp) / d).mkdir()
+                with self.assertRaises(pkg.PackageError):
+                    pkg.copy_dxc(self.zip(tmp, names), Path(tmp) / 'bin',
+                                 Path(tmp) / 'licenses')
+
+    def test_the_download_is_checked_against_the_pinned_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            data = self.zip(tmp)
+            pin = {'url': (tmp / 'dxc.zip').as_uri(),
+                   'sha256': pkg.sha256(data)}
+            (tmp / 'pin').mkdir()
+            (tmp / 'work').mkdir()
+            old, pkg.HERE = pkg.HERE, tmp / 'pin'
+            try:
+                (tmp / 'pin/dxc.json').write_text(json.dumps(pin))
+                # The file URL names the zip in tmp, the work directory is
+                # elsewhere, so this downloads.
+                self.assertEqual(pkg.fetch_dxc(tmp / 'work').name, 'dxc.zip')
+                pin['sha256'] = '0' * 64
+                (tmp / 'pin/dxc.json').write_text(json.dumps(pin))
+                (tmp / 'work/dxc.zip').unlink()
+                with self.assertRaises(pkg.PackageError):
+                    pkg.fetch_dxc(tmp / 'work')
+            finally:
+                pkg.HERE = old
+
+    def test_the_pin_is_a_hashed_release_url(self):
+        pin = json.loads((HERE / 'dxc.json').read_text(encoding='utf-8'))
+        self.assertTrue(pin['url'].startswith(
+            'https://github.com/microsoft/DirectXShaderCompiler/releases/'))
+        self.assertRegex(pin['sha256'], r'^[0-9a-f]{64}$')
+
+
+class GpuBackEnd(unittest.TestCase):
+    def test_gpu_linked_reads_config_host(self):
+        for config, linked in (('#define CONFIG_HAVE_SGI_GPU\n', True),
+                               ('#undef CONFIG_HAVE_SGI_GPU\n', False)):
+            with tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / 'config-host.h').write_text(config)
+                self.assertEqual(pkg.gpu_linked(Path(tmp)), linked)
 
 
 if __name__ == '__main__':

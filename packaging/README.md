@@ -49,6 +49,11 @@ in `licenses/`:
   `sgi-package.py`): the Rust crates linked statically from the `subprojects/`
   crate wraps, whose licence files are `licenses/<crate>-<version>.LICENSE*`,
   and the standard library, whose texts are `licenses/rust.*`.
+- Windows with the GPU back end: the DirectX Shader Compiler, whose
+  `dxcompiler.dll` and `dxil.dll` sit in `bin/` beside the emulator and whose
+  texts are `licenses/dxc.*`. wgpu loads them at run time and falls back to
+  Windows' older FXC compiler without them. The release is pinned, with the
+  SHA-256 of its zip, in `dxc.json`; static DXC is MSVC-only.
 - Linux: libstdc++, which the CHD library's C++ links with
   `-static-libstdc++`. Its texts are `licenses/libstdc++.copyright` and
   `licenses/libstdc++.GPL-3`.

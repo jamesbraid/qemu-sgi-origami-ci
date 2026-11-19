@@ -1,0 +1,6 @@
+{
+  "comment": "The DirectX Shader Compiler release shipped beside the Windows emulator. wgpu's D3D12 back end loads dxcompiler.dll, and dxil.dll beside it, at run time when they are found, and falls back to the slower FXC compiler when they are not. Static DXC is MSVC-only, so the MinGW build ships the DLLs. Bumping the release means replacing the url and the SHA-256 of the zip.",
+  "version": "v1.9.2609",
+  "url": "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip",
+  "sha256": "ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1"
+}
