@@ -37,6 +37,9 @@ concurrency:
 env:
   # Set only for a tag push; the other runs build development archives.
   RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/sgi-origami-') && github.ref_name || '' }}
+  # The Rust toolchain of the archives. The GPU library needs 1.94 or newer,
+  # and a release should not move with whatever is current.
+  RUST_VERSION: "1.94.1"
 
 jobs:
   linux:
@@ -114,17 +117,49 @@ jobs:
             git base-devel autoconf-archive curl zip unzip tar
             mingw-w64-x86_64-toolchain mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkgconf mingw-w64-x86_64-python
-            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-cmake mingw-w64-x86_64-rust-bindgen
+            mingw-w64-x86_64-clang
+      # rustc is installed from rustup, pinned to RUST_VERSION, because
+      # MSYS2's package rolls. rustup-init 1.29.2 is checked against the
+      # SHA-256 Rust publishes for it.
+      - name: install rustc ${{ env.RUST_VERSION }}
+        shell: msys2 {0}
+        run: |
+          curl -fsSL -o rustup-init.exe https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-pc-windows-gnu/rustup-init.exe
+          echo "d2845ad914acf5add202100c0a7ddf19ab1c3e52521e12841bafff13888e49bb *rustup-init.exe" | sha256sum -c -
+          ./rustup-init.exe -y --no-modify-path --profile minimal \
+              --default-host x86_64-pc-windows-gnu --default-toolchain "$RUST_VERSION"
+          rm rustup-init.exe
       - name: cache vcpkg binaries
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: build-package/vcpkg-binary-cache
           key: vcpkg-windows-${{ hashFiles('packaging/vcpkg.json', 'packaging/vcpkg-commit', 'packaging/triplets/x64-mingw-origami.cmake') }}
+      - name: cache the GPU library's crates
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-windows-${{ hashFiles('rust/sgi-gpu/Cargo.lock') }}
       - name: build the archive
         shell: msys2 {0}
         run: |
           git config --global --add safe.directory '*'
+          # The MSYS2 shell does not inherit the Windows PATH, where rustup put cargo.
+          export PATH="$(cygpath -u "$USERPROFILE")/.cargo/bin:$PATH"
+          rustc --version
           python packaging/sgi-package.py ${RELEASE_TAG:+--tag "$RELEASE_TAG"}
+      - name: the Rust devices and the GPU library are built in
+        shell: msys2 {0}
+        run: |
+          build=build-package/qemu-build
+          devices=$build/mips64-softmmu-config-devices.mak
+          grep '^CONFIG_X_SGI_BIC_BOARD_INTERFACE_RUST=y' "$devices"
+          # A "! grep" would not fail the step, so test the status.
+          if grep '^CONFIG_SGI_BIC_BOARD_INTERFACE_C=y' "$devices"; then
+            echo "the C board interface was built, not the Rust one"
+            exit 1
+          fi
+          grep '^#define CONFIG_HAVE_SGI_GPU' "$build/config-host.h"
       - name: run the archive with the MinGW toolchain off PATH
         timeout-minutes: 10
         # This step's PowerShell has none of MSYS2 on PATH, so a DLL the
@@ -133,6 +168,12 @@ jobs:
         run: |
           $archive = Get-ChildItem build-package/dist/*.zip | Select-Object -First 1
           Expand-Archive -Path $archive.FullName -DestinationPath unpacked
+          # The DirectX Shader Compiler, and the notices and licences of the
+          # Rust code, are what the Rust build adds to the archive.
+          foreach ($file in 'bin\dxcompiler.dll', 'bin\dxil.dll', 'licenses\sgi-gpu.THIRD-PARTY-NOTICES.txt') {
+              if (-not (Test-Path "unpacked\$file")) { throw "$file is not in the archive" }
+          }
+          if (-not (Get-ChildItem unpacked\licenses\rust.* -ErrorAction SilentlyContinue)) { throw "no Rust licences in the archive" }
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           $bin = Join-Path $PWD 'unpacked\bin'
           & "$bin\qemu-system-mips64.exe" --version
@@ -152,6 +193,9 @@ jobs:
               $p.Kill()
               $p.WaitForExit()
           }
+          # The Rust board interface, and the GPU library's test device.
+          Test-Starts '-accel qtest -cpu R10000 -device sgi-bic-board-interface-fixture,id=bic,identity=0xc000'
+          Test-Starts '-device x-sgi-gpu-test,id=g'
           Test-Starts '-vnc 127.0.0.1:0,password=on'
           Test-Starts '-object tls-creds-anon,id=tc0,endpoint=server -vnc 127.0.0.1:0,tls-creds=tc0'
           & "$bin\qemu-img.exe" create -f luks --object secret,id=s,data=pw -o key-secret=s "$env:RUNNER_TEMP\test.luks" 1M
