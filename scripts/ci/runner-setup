@@ -187,8 +187,13 @@ case "${1-}" in
     # which the release build uses, so code that builds only on POSIX
     # hosts fails here rather than when a release is cut.
     : "${WORKSPACE_VOLUME:?WORKSPACE_VOLUME is required}"
-    windows_image=$(docker build -q \
+    # FROM needs a tag: the daemon would try to pull an image id.
+    base_image=sgi-win64-cross-base
+    docker build -q -t "$base_image" \
         -f tests/docker/dockerfiles/fedora-win64-cross.docker \
+        tests/docker/dockerfiles
+    windows_image=$(docker build -q --build-arg "BASE=$base_image" \
+        -f tests/docker/dockerfiles/fedora-win64-cross-sgi.docker \
         tests/docker/dockerfiles)
     test -n "$windows_image"
     IMAGE_ID=$windows_image bash "$0" run -v "$WORKSPACE_VOLUME:/src" \

@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# The generated MinGW cross image plus cargo, which its rust package leaves
+# out and rust/sgi-gpu needs, and clang, without which bindgen finds no
+# stdbool.h for a MinGW target.
+ARG BASE
+FROM ${BASE}
+RUN nosync dnf --quiet install -y cargo clang && nosync dnf --quiet clean all -y

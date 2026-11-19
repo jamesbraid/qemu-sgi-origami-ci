@@ -907,7 +907,8 @@ class WindowsMode(unittest.TestCase):
 
     def calls(self, configured):
         with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch.object(sgi_check, 'run') as run:
+                mock.patch.object(sgi_check, 'run') as run, \
+                mock.patch.object(sgi_check, 'check_rust_devices'):
             build = Path(tmp) / 'build-windows'
             if configured:
                 build.mkdir()
@@ -931,8 +932,19 @@ class WindowsMode(unittest.TestCase):
     def test_flags_are_the_release_builds(self):
         flags = json.loads((SOURCE / 'packaging/configure-flags.json')
                            .read_text(encoding='utf-8'))
-        for flag in flags['common'] + flags['windows']:
+        for flag in flags['common'] + flags['windows'] + flags['rust']:
             self.assertIn(flag, sgi_check.WINDOWS_CONFIGURE_ARGS)
+
+    def test_the_rust_devices_are_checked_after_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(sgi_check, 'run'):
+            build = Path(tmp) / 'build-windows'
+            build.mkdir()
+            (build / 'build.ninja').touch()
+            (build / 'mips64-softmmu-config-devices.mak').write_text(
+                'CONFIG_SGI_GPU_TEST=y\n', encoding='utf-8')
+            with self.assertRaises(SystemExit):
+                sgi_check.main(['windows', '--dir', str(build)])
 
     def test_configured_directory_is_only_built(self):
         build, calls = self.calls(configured=True)
@@ -952,7 +964,9 @@ class WindowsMode(unittest.TestCase):
                 sgi_check.stage_windows(build, stage)
             self.assertEqual(sorted(p.name for p in stage.iterdir()),
                              ['a.dll', 'display-shm-test.exe',
-                              'qemu-system-mips64.exe'])
+                              'qemu-system-mips64.exe',
+                              'sgi-bic-board-interface-test.exe',
+                              'sgi-gpu-test.exe'])
 
     def test_sdl2_brings_the_sdl3_it_loads(self):
         def objdump(argv, **kwargs):

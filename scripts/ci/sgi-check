@@ -59,22 +59,26 @@ RUST_DEVICE_CONFIGS = ['CONFIG_X_SGI_BIC_BOARD_INTERFACE_RUST=y',
                        'CONFIG_SGI_GPU_TEST=y']
 
 # The Windows release is cross-compiled with MinGW in the image built from
-# tests/docker/dockerfiles/fedora-win64-cross.docker. Its configure arguments
+# tests/docker/dockerfiles/fedora-win64-cross-sgi.docker. Its configure arguments
 # are the release build's own, from the list packaging/sgi-package.py builds
 # the archives with, so a flag edit is compiled on every pull request.
 with open(SOURCE / 'packaging/configure-flags.json', encoding='utf-8') as f:
     _RELEASE_FLAGS = json.load(f)
 WINDOWS_CONFIGURE_ARGS = ['--cross-prefix=x86_64-w64-mingw32-',
                           *_RELEASE_FLAGS['common'],
-                          *_RELEASE_FLAGS['windows']]
+                          *_RELEASE_FLAGS['windows'],
+                          *_RELEASE_FLAGS['rust']]
 # chd-fixture builds the CHD iotest's images; the iotests do not run on
 # Windows, but compiling it checks the MinGW build of the CHD library.
-# display-shm-test.exe is staged for the Windows qtest run of
+# The qtests are staged for the Windows runs of
 # .github/workflows/windows-display-shm.yml.
+WINDOWS_QTESTS = ['tests/qtest/display-shm-test.exe',
+                  'tests/qtest/sgi-bic-board-interface-test.exe',
+                  'tests/qtest/sgi-gpu-test.exe']
 WINDOWS_TARGETS = ['qemu-system-mips64.exe', 'qemu-img.exe',
                    'subprojects/libchdman-rs-0.289.5/chd-fixture.exe',
-                   'tests/qtest/display-shm-test.exe']
-WINDOWS_STAGED = ['qemu-system-mips64.exe', 'tests/qtest/display-shm-test.exe']
+                   *WINDOWS_QTESTS]
+WINDOWS_STAGED = ['qemu-system-mips64.exe', *WINDOWS_QTESTS]
 MINGW_BIN = Path('/usr/x86_64-w64-mingw32/sys-root/mingw/bin')
 # Files loaded or run at run time, which no import table names. Fedora's
 # SDL2.dll is sdl2-compat: without SDL3.dll it stops the program start on a
@@ -408,6 +412,7 @@ def windows(args):
     if not (path / 'build.ninja').exists():
         run([SOURCE / 'configure', *WINDOWS_CONFIGURE_ARGS], cwd=path)
     run(['ninja', '-C', path, *WINDOWS_TARGETS])
+    check_rust_devices(path)
     if args.stage:
         stage_windows(path, args.stage)
 
