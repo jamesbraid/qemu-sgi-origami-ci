@@ -29,8 +29,10 @@ vcpkg-commit. Each platform builds natively:
     macos    on an arm64 Mac with Xcode's tools and Homebrew's ninja,
              pkgconf and python
     windows  in an MSYS2 MINGW64 shell with the mingw-w64-x86_64 toolchain,
-             pkgconf, ninja, python and git installed. QEMU cannot build
-             with MSVC, so vcpkg uses its MinGW triplet there.
+             pkgconf, ninja, python, git, rust-bindgen and clang installed,
+             and rustc 1.94 or newer for x86_64-pc-windows-gnu from rustup.
+             QEMU cannot build with MSVC, so vcpkg uses its MinGW triplet
+             there.
 
 Everything is written under --work-dir, which a rerun reuses. The configure
 arguments are in configure-flags.json, which scripts/ci/sgi-check shares.
@@ -93,7 +95,7 @@ LICENSE_FILES = [
 ]
 # Platforms whose archive carries the Rust devices, built with the "rust" list
 # of configure-flags.json.
-RUST_PLATFORMS = ()
+RUST_PLATFORMS = ('windows',)
 
 LICENSE_NAME = re.compile(r'^(LICEN[CS]E|COPYING|COPYRIGHT)', re.I)
 # The licence texts of the Rust crates the GPU back end links, kept current by
@@ -738,6 +740,9 @@ def package(args):
     build_qemu(name, build, env, f'sgi-origami {label}', args.jobs)
 
     gpu = gpu_linked(build)
+    if name in RUST_PLATFORMS and not gpu:
+        raise PackageError('the build did not link the GPU back end, which '
+                           'needs rustc 1.94 or newer')
     stage_dir = work / 'stage'
     dxc = fetch_dxc(work) if name == 'windows' and gpu else None
     stage(name, build, prefix, stage_dir, not args.no_strip, dxc)

@@ -108,11 +108,16 @@ python3 packaging/sgi-package.py
 ```
 
 Windows, in an MSYS2 MINGW64 shell. QEMU cannot build with MSVC, so vcpkg
-runs with a MinGW triplet and the MSYS2 compiler on `PATH`:
+runs with a MinGW triplet and the MSYS2 compiler on `PATH`. The archive has
+QEMU's Rust devices and the GPU back end, which need rustc 1.94 or newer for
+`x86_64-pc-windows-gnu` (from rustup, with `~/.cargo/bin` on `PATH`) and
+bindgen with clang's libclang; the build stops if the GPU back end was not
+built:
 
 ```sh
 pacman -S --needed git base-devel autoconf-archive mingw-w64-x86_64-toolchain \
-    mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-python
+    mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-python \
+    mingw-w64-x86_64-rust-bindgen mingw-w64-x86_64-clang
 python packaging/sgi-package.py
 ```
 
